@@ -1,0 +1,197 @@
+---
+title: "Accidentes ocurridos en EE.UU"
+author: "WILLIAM DAVID IBICA PREGONERO"
+date: "2026-02-25"
+output: html_document
+---
+```{r, echo=FALSE}
+pacman::p_load(BiocManager, lmtest, car, MASS, NHSRdatasets, ResourceSelection,
+               pROC, rcompanion, nortest, tidyverse, caret, mgcv, rms,
+               jtools, forestmodel,gvlma, trafo, readxl, tidyverse, naniar,
+               DataExplorer, FactoMineR, factoextra, corrplot,sjPlot,ggplot2,
+               MVN, DT, tidyplots, performance,see,SmartEDA,doBy, fitdistrplus,
+               forcats, patchwork, broom, sandwich, plotly, gapminder)
+
+ruta_in <- "C:/Users/user/3D Objects/MODELOS_POS/Modelos_Poisson/Bases/ACCI_EE.UU/out/"
+
+# Cargar las colecciones
+#mis_tablas <- readRDS(paste0(ruta_in, "tablas_descriptivas_completas.rds"))
+mis_barras <- readRDS(paste0(ruta_in, "graficos_barras.rds"))
+mis_boxplots <- readRDS(paste0(ruta_in, "graficos_boxplot_todos.rds"))
+General  <- readRDS(paste0(ruta_in, "modelo.rds"))
+mod_bin_neg <- readRDS( paste0(ruta_in, "modelo_binomial.rds"))
+Ojiva <- readRDS(paste0(ruta_in, "Ojiva.rds"))
+#Graf_reg <- readRDS( paste0(ruta_in, "grafico_regresion.rds"))
+#Compara_graf <- readRDS( paste0(ruta_in, "grafico_validacion.rds"))
+Formula <- readRDS( paste0(ruta_in, "Formula.rds"))
+df <- readRDS( paste0(ruta_in, "df_modelo.rds"))
+```
+
+# ANÁLISIS DE DATOS FALTANTES
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/NA_1.png")
+```
+*Nota*. El gráfico de barras horizontales muestra el porcentaje de filas con valores faltantes (Missing Rows) para cada una de las variables del conjunto de datos de accidentes de tránsito en EE. UU. (n = 102,598 observaciones luego del filtrado). Las barras se codifican en tres categorías de calidad: Good (verde, 0 %–5 %), OK (amarillo, 5 %–25 %) y Bad (rojo, > 25 %). La mayoría de las variables presentan 0 % de datos faltantes, lo cual indica una calidad de datos excelente en esas columnas. Las variables Velocidad_Viento_mph (7.4 %), Sensación_Térmica_F (25.8 %) y Precipitación_pulg (28.52 %) registran porcentajes intermedios y altos respectivamente, mientras que Longitud_Fin y Latitud_Fin concentran el mayor porcentaje de valores ausentes (44.08 % cada una), clasificándose como Bad. Este patrón sugiere que las coordenadas de finalización del accidente no siempre fueron registradas en la fuente original.
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/NA_3.png")
+```
+Nota. El segundo gráfico de barras horizontales exhibe el porcentaje de datos faltantes una vez aplicado el proceso de depuración. Todas las variables presentan un valor de 0 %, lo que se refleja en que todas las barras pertenecen a la categoría Good (verde). Esto confirma que el tratamiento de valores ausentes —ya sea mediante eliminación de registros incompletos o imputación— fue exitoso y que el conjunto de datos analítico final no contiene valores faltantes en ninguna de sus variables. Este resultado es un prerequisito fundamental para garantizar la validez de los análisis estadísticos subsiguientes.
+
+### Medidas descriptivas (variables cuantitativas)
+```{r out.width = "70%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/Datos descriptivos_num.PNG")
+```
+La tabla presenta los estadísticos descriptivos de las tres variables cuantitativas incluidas en el modelo para n = 102,598 observaciones. La variable Accidentes, que constituye la variable dependiente del análisis, registra una media de M = 4.68 (DE = 14.75), con valores que oscilan entre 1 y 687 accidentes por unidad de observación; la elevada desviación estándar en relación con la media y la fuerte asimetría positiva sugieren la presencia de valores extremos y una distribución marcadamente sesgada a la derecha, característica típica de datos de conteo. La temperatura media (temp_media) presenta una media de M = 57.60 °F (DE = 19.11), con un rango que va de -23.10 a 114.10 °F, lo que refleja la amplia diversidad climática de los estados de EE. UU. incluidos en la muestra. Finalmente, la visibilidad media (visib_media) muestra una media de M = 8.36 millas (DE = 3.19), con valores entre 0 y 80 millas.
+###  Medidas descriptivas  (variables categoricas)
+```{r out.width = "40%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/AÑO_desp.PNG")
+```
+ La tabla muestra la distribución anual de los registros de accidentes de tránsito en EE. UU. para el período 2016–2023 (N = 102,598). Se observa una tendencia creciente en el número de accidentes registrados entre 2016 (n = 6,474; 6.31 %) y 2022 (n = 17,634; 17.19 %), año que concentra la mayor cantidad de observaciones. El año 2023 presenta una frecuencia notablemente menor (n = 3,067; 2.99 %), lo cual probablemente refleja un período de recopilación incompleto en la fuente de datos y no necesariamente una disminución real en la siniestralidad. Para el año 2016, la cifra comparativamente baja podría deberse a un inicio tardío del registro. El 50 % de los registros se acumula entre los años 2016 y 2019 (47.67 % acumulado), mientras que la segunda mitad corresponde al período 2020–2023.
+ 
+```{r out.width = "50%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/Condi_clima_desp.PNG")
+```
+La tabla presenta la distribución de frecuencias de la variable condición climática agrupada (N = 102,598). La categoría predominante es Nublado, con 49,441 registros (48.19 %), seguida de Despejado con 23,795 (23.19 %) y Lluvia con 16,573 (16.15 %). En conjunto, estas tres categorías representan el 87.53 % de todos los accidentes. La condición Nieve/Hielo corresponde al 4.05 % de los registros, mientras que Visibilidad reducida alcanza el 5.35 %. Las categorías menos frecuentes son Tormenta/Extremo (2.49 %) y Otras (0.57 %). Estos resultados sugieren que la mayoría de los accidentes se producen bajo condiciones de nubosidad o clima despejado, posiblemente debido a la mayor exposición al tráfico en estos escenarios.
+
+```{r out.width = "40%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/Franja_hor_desp.PNG")
+```
+La tabla presenta la distribución de los accidentes de tránsito según la franja horaria del día (N = 102,598). La franja de Mañana concentra el mayor número de eventos con 33,313 registros (32.47 %), seguida de Tarde con 32,803 (31.97 %), lo que indica que ambas franjas diurnas acumulan en conjunto el 64.44 % de los accidentes. La franja Noche registra 21,789 accidentes (21.24 %) y la Madrugada presenta la menor incidencia con 14,693 (14.32 %). Este patrón es consistente con los volúmenes de tráfico esperados durante el día, donde la circulación vehicular es significativamente mayor en horas laborales.
+
+```{r out.width = "35%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/mes_desp.PNG")
+```
+ La tabla muestra la distribución mensual de los accidentes de tránsito (N = 102,598). Diciembre presenta la mayor frecuencia absoluta con 10,337 registros (10.08 %), seguido de Enero (9,854; 9.60 %) y Febrero (9,441; 9.20 %), lo que apunta a una mayor siniestralidad en los meses de invierno, posiblemente asociada a condiciones adversas de clima y menor visibilidad. Los meses con menor frecuencia son Julio (7,248; 7.06 %), Mayo (7,597; 7.40 %) y Abril (7,989; 7.79 %). La variación entre el mes más frecuente (Diciembre) y el menos frecuente (Julio) es de aproximadamente 3 puntos porcentuales, lo que sugiere una distribución mensual relativamente uniforme con una ligera estacionalidad hacia los meses fríos.
+
+```{r out.width = "40%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/Semaforo_inter_desp.PNG")
+```
+La tabla presenta la distribución de frecuencias de las variables dicotómicas Semáforo e Intersección (N = 102,598). En cuanto a la variable Semáforo, el 75.51 % de los accidentes ocurrieron en lugares sin semáforo (n = 77,470), mientras que el 24.49 % se registraron en intersecciones con control semafórico (n = 25,128). Respecto a la variable Intersección, la mayoría de los accidentes ocurrieron fuera de intersecciones (82.80 %; n = 84,953), y únicamente el 17.20 % de los eventos (n = 17,645) se registraron en intersecciones viales. Estos hallazgos, aunque aparentemente contraintuitivos, son coherentes con el mayor volumen de tráfico en tramos de vía abierta en comparación con los puntos de intersección.
+## GRÁFICOS 
+
+### Gráfico de frecuencias 
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+mis_barras[[1]]
+```
+
+```{r out.width = "40%", fig.align = "center", echo=FALSE}
+knitr::include_graphics("out/Hist.png")
+```
+
+El gráfico de barras presenta la distribución de frecuencias de la variable de conteo Accidentes. En el eje vertical (ordenada) se registra el número de accidentes por unidad de observación, y en el eje horizontal (abscisa) se representan los intervalos de valor de la variable. La figura evidencia una distribución fuertemente sesgada a la derecha (asimetría positiva), típica de variables de conteo de eventos raros: la gran mayoría de las observaciones se concentra en valores bajos (entre 1 y 10 accidentes), con una cola derecha extendida que alcanza hasta 687 accidentes en los valores más extremos. Esta distribución es el fundamento teórico que justifica el uso de modelos lineales generalizados de la familia Poisson y Binomial Negativa para modelar la variable respuesta.
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+subplot(mis_barras[[3]], mis_barras[[4]], nrows = 1)  
+```
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+subplot(mis_barras[[5]], mis_barras[[6]], mis_barras[[2]] ,nrows = 1)  
+```
+
+### Gráficos de Boxplot
+```{r out.width = "50%", fig.align = "center", echo=FALSE}
+mis_boxplots$simples
+```
+
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+mis_boxplots$outliers[[1]]
+```
+
+El gráfico de caja y bigotes (boxplot) muestra la distribución del número de accidentes de tránsito según el estado (Estado) de EE. UU. (N = 102,598). El eje vertical representa el número de accidentes y el eje horizontal los distintos estados. Las cajas corresponden al rango intercuartílico (Q1–Q3) y la línea central indica la mediana. Los puntos rojos representan valores atípicos (outliers). Se observa que California (CA) presenta la distribución más dispersa y los valores más extremos, con observaciones que superan los 680 accidentes, seguida de Florida (FL) y Arizona (AZ). La mayoría de los estados presentan medianas bajas y cajas compactas, lo que refleja una gran heterogeneidad entre estados respecto a la siniestralidad registrada. La presencia de múltiples valores atípicos en varios estados es consistente con la sobredispersión identificada en la variable respuesta.
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+mis_boxplots$outliers[[2]] + mis_boxplots$outliers[[3]]
+```
+
+La figura presenta dos diagramas de caja y bigotes en paralelo. El panel izquierdo muestra la relación entre el número de accidentes y la condición climática agrupada, mientras que el panel derecho ilustra la misma relación según el mes del año. En ambos paneles, el eje vertical indica el número de accidentes. En el panel de condición climática, la categoría Despejado concentra la mayor dispersión y los valores atípicos más altos (hasta 687), seguida de Nublado; categorías como Nieve/Hielo, Otras y Tormenta/Extremo presentan distribuciones mucho más compactas y medianas más bajas. En el panel mensual, todos los meses presentan medianas similares y cercanas a cero, con valores atípicos elevados distribuidos relativamente de manera uniforme a lo largo del año, si bien los meses de invierno (enero, febrero, diciembre) tienden a mostrar valores extremos ligeramente más altos.
+
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+mis_boxplots$outliers[[4]] + mis_boxplots$outliers[[5]]
+```
+
+Los diagramas de caja y bigotes comparan la distribución del número de accidentes según la presencia de semáforo (panel izquierdo) y de intersección (panel derecho). En ambos paneles, la categoría No presenta una distribución considerablemente más dispersa, con medianas bajas pero valores atípicos muy elevados (hasta 687 accidentes), mientras que la categoría Sí muestra una distribución más compacta, con valores atípicos que no superan los 80–100 accidentes. Este resultado es coherente con el mayor volumen de observaciones en la categoría No para ambas variables y sugiere que los tramos sin semáforo ni intersección concentran los eventos de siniestralidad más extremos, posiblemente asociados a vías de alta velocidad o gran afluencia de tráfico.
+
+### Ojiva
+```{r out.width = "50%", fig.show = "hold", fig.align = "default", echo=FALSE}
+ knitr::include_graphics(c("Datos/ojiva_accidentes_anual.gif", 
+                           "Datos/ojiva_accidentes_mes.gif",
+                           "Datos/ojiva_accidentes_franja.gif"))
+```
+
+El análisis de las ojivas revela una tendencia de crecimiento sostenido en la siniestralidad desde 2016, con una aceleración crítica entre 2021 y 2022 antes de mostrar una ligera estabilización hacia 2023. A nivel mensual, el riesgo se distribuye de manera uniforme y constante, lo que sugiere que no existen factores estacionales que disparen los accidentes en épocas específicas del año. Sin embargo, el análisis por franja horaria identifica un patrón de riesgo altamente concentrado, donde la mañana y la tarde acumulan el 70% de los eventos totales, destacando la mañana como el periodo con la pendiente más pronunciada y, por ende, de mayor peligrosidad, mientras que la madrugada y la noche representan las fases de menor aporte a la siniestralidad acumulada.
+
+# APLICACIÓN DE GLM
+Con el propósito de identificar el modelo de regresión más adecuado para la variable de conteo Accidentes, se compararon dos familias de modelos dentro del marco de los Modelos Lineales Generalizados (GLM): el Modelo de Regresión Poisson y el Modelo de Regresión Binomial Negativo. La comparación se fundamentó en criterios de ajuste global (AIC, BIC, $Pseudo-R^2$) y en la prueba de sobredispersión, cuyo resultado determina si la distribución Poisson (que asume equidispersión: $Var(Y) = E(Y))$ es apropiada o si se requiere una familia más flexible que permita $\phi > 1$.
+ 
+### Modelo de Regresión Poisson
+```{r,echo=FALSE}
+summ(General,exp = T, confint = T)
+```
+
+Se observa que la métrica $Pseudo-R^2  \ \ \text{de McFadden}$ es de un $0.47$ y el $Pseudo-R^2  \ \ \text{de Cragg-Uhlee}$ siendo de $1$  confirman que el modelo explica el $47 \%$ de la variabilidad de los datos, el resultado proporciona una buena respuesta para realizar inferencia en el modelo. Para confirmar, evaluaremos la prueba de sobre-dispersión
+
+```{r}
+## Prueba de sobre dispersión
+deviance(General)/summary(General)$df[2]
+```
+
+El resultado nos indica un valor por encima de la equidisperción ($VAR(Y)=E(Y)$), por ende, el modelo tiende a sufrir sobre-dispersión, el problema, en la cuál, al realizar inferencia sobre el modelo los errores estándar estarían subestimados, lo que inflaría artificialmente los valores $z$ y reduciría los valores $P$, conduciendo a conclusiones erróneas sobre la significancia de los predictores, tal es así que para manejar este problema, se empleara un modelo de regresión Binomial Negativo, ya que maneja 
+
+\[ \phi > 1\] o mas específico valores por encima de \[ \phi > 2\]
+
+### Modelo de regresión Binomial Negativo
+
+```{r,echo=FALSE}
+summ(mod_bin_neg,exp = T, confint = T)
+```
+
+- **Resultados**
+```{r, echo=FALSE}
+
+aic_val    <- AIC(mod_bin_neg)
+bic_val    <- BIC(mod_bin_neg)
+logl_2_val <- -450472.043
+theta_val  <- mod_bin_neg$theta
+theta_se   <- mod_bin_neg$SE.theta 
+predichos  <- predict(mod_bin_neg, type = "response")
+rmse_val   <- sqrt(mean((df$Accidentes - predichos)^2, na.rm = TRUE))
+
+tabla_validacion <- data.frame(
+  Estadistico = c(
+    "AIC", 
+    "BIC", 
+    "2 x Log-Likelihood", 
+    "Theta (Dispersión)", 
+    "Std. Error (Theta)",
+    "RMSE (Error Medio)"
+  ),
+  Valor = round(c(
+    aic_val, 
+    bic_val, 
+    logl_2_val, 
+    theta_val, 
+    theta_se, 
+    rmse_val 
+  ), 4)
+)
+
+datatable(tabla_validacion) %>% 
+    formatStyle('Estadistico', backgroundColor = 'aquamarine', fontWeight = 'bold') %>% 
+  formatStyle('Valor', backgroundColor = 'beige', fontWeight = 'bold')
+```
+
+El modelo de regresión Binomial Negativo fue ajustado como alternativa al modelo Poisson para corregir la sobredispersión detectada. El modelo incluye las mismas variables predictoras que el Poisson (n = 102,598; variable dependiente: Accidentes; función de enlace: log) y estima adicionalmente el parámetro de forma θ = 2.2365 que controla el grado de sobredispersión. La prueba de razón de verosimilitud resulta estadísticamente significativa, χ²(102,518) = 90,061.19, p < .001. El Pseudo-R² de McFadden = 0.17 indica que el modelo explica el 17 % de la variabilidad en la devianza, mientras que el Pseudo-R² de Cragg-Uhler = 0.59 refleja un ajuste moderado. Crucialmente, la razón de devianza φ̂ = 0.83 es inferior a 1, lo que indica que el modelo Binomial Negativo resuelve satisfactoriamente el problema de sobredispersión del modelo Poisson (φ̂ = 3.91). Adicionalmente, el AIC del modelo Binomial Negativo (450,634.04) es considerablemente inferior al del modelo Poisson (681,534.92), confirmando que el Modelo Binomial Negativo proporciona un mejor ajuste relativo a los datos con menor penalización por complejidad. Por estas razones, el modelo Binomial Negativo es seleccionado como el modelo final para la inferencia estadística.
+
+```{r}
+## Prueba de sobre-dispersión
+deviance(mod_bin_neg)/summary(mod_bin_neg)$df[2]
+```
+
+## Comparación del mejor modelo 
+```{r out.width = "100%", fig.align = "center", echo=FALSE}
+ knitr::include_graphics("out/mejor_ajuste_distri.png")
+```
+
+La figura presenta dos paneles comparativos entre el modelo de Regresión Poisson (línea azul continua) y el modelo Binomial Negativo (línea naranja discontinua y línea negra de referencia). El panel izquierdo muestra la función de distribución acumulada (CDF) empírica de los datos observados junto a las CDF teóricas predichas por cada modelo. La CDF del modelo Binomial Negativo (NegBin, línea naranja discontinua) se aproxima con mayor fidelidad a la distribución empírica de los datos en comparación con la CDF del modelo Poisson (línea azul), que se aleja considerablemente de los datos observados, especialmente en la cola derecha de la distribución. El panel derecho muestra el gráfico cuantil-cuantil (Q-Q) que compara los cuantiles teóricos de cada distribución con los cuantiles empíricos de los datos. La línea de referencia diagonal (línea negra) representa el ajuste perfecto. El modelo Poisson (línea azul) se aleja drásticamente de la línea de referencia, subestimando los cuantiles superiores. El modelo Binomial Negativo (línea naranja) se acerca en mayor medida a la línea de referencia, aunque todavía subestima ligeramente los cuantiles más altos, lo cual es esperado dada la extrema asimetría de la variable respuesta. En conjunto, ambos paneles confirman visualmente la superioridad del modelo Binomial Negativo para capturar la distribución real de los datos de accidentes de tránsito en EE. UU.
