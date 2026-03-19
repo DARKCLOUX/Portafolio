@@ -89,26 +89,26 @@ data <- data %>%
 # conversión de variables a factor ----------------------------------------
 data <- data %>%
   
-  # 1. Variables de texto a factor
+  # Variables de texto a factor
   mutate(across(c(Fuente, Estado, Pais, Zona_Horaria, 
                   Direccion_Viento, Condicion_Climatica,
                   Amanecer_Atardecer, Crepusculo_Civil,
                   Crepusculo_Nautico, Crepusculo_Astronomico), 
                 as.factor)) %>%
   
-  # 2. Severidad como factor ORDINAL
+  # Severidad como factor ORDINAL
   mutate(Severidad = factor(Severidad, 
                             levels = c(1, 2, 3, 4),
                             labels = c("Leve", "Moderado", 
                                        "Grave", "Muy_Grave"),
                             ordered = TRUE)) %>%
   
-  # 3. Variables lógicas a factor
+  # Variables lógicas a factor
   mutate(across(where(is.logical), 
                 ~ factor(., levels = c(FALSE, TRUE), 
                          labels = c("No", "Si")))) %>%
   
-  # 4. Extraer componentes temporales de Hora_Inicio
+  # Extraer componentes temporales de Hora_Inicio
   mutate(
     año       = as.factor(year(Hora_Inicio)),
     mes       = as.factor(month(Hora_Inicio, label = TRUE)),
@@ -125,17 +125,17 @@ data <- data %>%
 
 data <- data %>%
   mutate(
-    # 1. Traducir Fuente
+    # Traducir Fuente
     Fuente = fct_recode(Fuente,
                         "Fuente 1" = "Source1",
                         "Fuente 2" = "Source2",
                         "Fuente 3" = "Source3"
     ),
     
-    # 2. Traducir País
+    # Traducir País
     Pais = fct_recode(Pais, "EE. UU." = "US"),
     
-    # 3. Traducir Zonas Horarias
+    # Traducir Zonas Horarias
     Zona_Horaria = fct_recode(Zona_Horaria,
                               "Central (EE.UU.)"  = "US/Central",
                               "Este (EE.UU.)"     = "US/Eastern",
@@ -143,7 +143,7 @@ data <- data %>%
                               "Pacífico (EE.UU.)" = "US/Pacific"
     ),
     
-    # 4. Traducir Direcciones del Viento (Mapeo de puntos cardinales)
+    # Traducir Direcciones del Viento (Mapeo de puntos cardinales)
     Direccion_Viento = fct_recode(Direccion_Viento,
                                   "Calma" = "Calm", "Calma" = "CALM",
                                   "Norte" = "North", "N" = "N",
@@ -153,11 +153,11 @@ data <- data %>%
                                   "Variable" = "Variable", "Var" = "VAR"
     ),
     
-    # 5. Traducir Ciclos de luz (Día/Noche)
+    # Traducir Ciclos de luz (Día/Noche)
     across(c(Amanecer_Atardecer, Crepusculo_Civil, Crepusculo_Nautico, Crepusculo_Astronomico),
            ~ fct_recode(.x, "Día" = "Day", "Noche" = "Night")),
     
-    # 6. Traducir Condición Climática (Los más comunes y patrones)
+    # Traducir Condición Climática (Los más comunes y patrones)
     # Nota: Al ser 107, usaremos reemplazo de texto para mayor eficiencia
     Condicion_Climatica = as.character(Condicion_Climatica) %>%
       str_replace_all(c(
@@ -245,7 +245,7 @@ bar6 <- ggplot(df) +
 b6 <- ggplotly(bar6)
 
 ## Gráfico de ojiva
-# ── 1. Ojiva por AÑO ──────────────────────────────────────
+#  Ojiva por AÑO ──────────────────────────────────────
 ojiva_año <- datos %>%
   group_by(año) %>%
   summarise(total = sum(Accidentes)) %>%
@@ -259,14 +259,13 @@ ojiva_año <- ojiva_año %>%
   mutate(año = as.numeric(as.character(año)))
 
 p1 <- ggplot(ojiva_año, aes(x = año, y = freq_rel_acum, group = 1)) +
-  # Usamos stat = "identity" para evitar el error de geom_area
   geom_area(fill = "#2196F3", alpha = 0.15, stat = "identity") +
   geom_line(color = "#2196F3", linewidth = 1.2) +
   geom_point(color = "#2196F3", size = 3) +
   scale_y_continuous(limits = c(0, 100),
                      breaks = seq(0, 100, 20),
                      labels = function(x) paste0(x, "%")) +
-  # Aseguramos que los años en el eje X se vean bien (sin decimales)
+  
   scale_x_continuous(breaks = seq(min(ojiva_año$año), max(ojiva_año$año), by = 1)) +
   labs(title    = "Accidentes por Año",
        subtitle = "Frecuencia relativa acumulada",
@@ -277,7 +276,7 @@ p1 <- ggplot(ojiva_año, aes(x = año, y = freq_rel_acum, group = 1)) +
 
 p1_1 <- animate(p1, renderer = gifski_renderer())
 anim_save("ojiva_accidentes_anual.gif", animation = p1_1)
-# ── 2. Ojiva por MES ──────────────────────────────────────
+# Ojiva por MES ──────────────────────────────────────
 ojiva_mes <- datos %>%
   group_by(mes) %>%
   summarise(total = sum(Accidentes)) %>%
@@ -291,7 +290,6 @@ ojiva_mes <- ojiva_mes %>%
   mutate(mes_eje = as.numeric(as.factor(mes)))
 
 p2 <- ggplot(ojiva_mes, aes(x = mes_eje, y = freq_rel_acum, group = 1)) +
-  # Agregamos stat = "identity" a geom_area para evitar el conflicto
   geom_area(fill = "#E91E63", alpha = 0.15, stat = "identity") +
   geom_line(color = "#E91E63", linewidth = 1.2) +
   geom_point(color = "#E91E63", size = 3) +
@@ -309,7 +307,7 @@ p2 <- ggplot(ojiva_mes, aes(x = mes_eje, y = freq_rel_acum, group = 1)) +
 p2_2 <- animate(p2, renderer = gifski_renderer())
 anim_save("ojiva_accidentes_mes.gif", animation = p2_2)
 
-# ── 3. Ojiva por FRANJA HORARIA ───────────────────────────
+# Ojiva por FRANJA HORARIA ───────────────────────────
 ojiva_franja <- datos %>%
   group_by(franja_horaria) %>%
   summarise(total = sum(Accidentes)) %>%
@@ -332,7 +330,6 @@ p3 <- ggplot(ojiva_franja, aes(x = franja_idx, y = freq_rel_acum, group = 1)) +
   scale_y_continuous(limits = c(0, 100),
                      breaks = seq(0, 100, 20),
                      labels = function(x) paste0(x, "%")) +
-  # Volvemos a poner los nombres de las franjas en el eje X
   scale_x_continuous(breaks = 1:4, labels = levels(ojiva_franja$franja_horaria)) +
   labs(title    = "Accidentes por Franja Horaria",
        subtitle = "Frecuencia relativa acumulada",
@@ -343,6 +340,7 @@ p3 <- ggplot(ojiva_franja, aes(x = franja_idx, y = freq_rel_acum, group = 1)) +
 
 p3_3 <- animate(p3, renderer = gifski_renderer())
 anim_save("ojiva_accidentes_franja.gif", animation = p3_3)
+
 ### Gráficos de boxplot
 
 Box1 <- ggplot(df) + 
@@ -469,32 +467,6 @@ df <- datos %>%
            temp_media,
            visib_media)
 
-## ANÁLISIS  DE GRÁFICO 
-# 1. Ajuste de modelos (asegúrate de que existan)
-fit.poisson = fitdist(df$Accidentes, "pois")
-fit.negbin  = fitdist(df$Accidentes, "nbinom")
-
-# 2. Configuración del panel
-par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
-
-# CDF Comp corregido
-# Usamos 'fitcol' para los modelos y 'datacol' para los datos observados
-cdfcomp(list(fit.poisson, fit.negbin), 
-        legendtext = c("Poisson", "NegBin"), 
-        main = "Comparación de CDF",
-        fitcol = c("steelblue", "darkorange"), # Argumento específico para líneas
-        datacol = "grey70")                  # Argumento específico para puntos
-
-# QQ Comp corregido
-# En qqcomp también se usa 'fitcol' para los símbolos de los modelos
-qqcomp(list(fit.poisson, fit.negbin), 
-       legendtext = c("Poisson", "NegBin"),
-       main = "Gráfico Q-Q",
-       fitcol = c("steelblue", "darkorange"))
-
-par(mfrow = c(1, 1))
-
-
 # Aplicación del modelo ---------------------------------------------------
 
 General <- glm(Accidentes ~ ., data = df, family = "poisson")
@@ -564,6 +536,28 @@ ggplot(comparativa, aes(x = Accidentes)) +
 #%>%
  # filter(Accidentes <= 5) # Filtramos hasta 5 para que sea legible
 
+## ANÁLISIS  DE GRÁFICO ( mejor ajuste de modelo)
+
+fit.poisson = fitdist(df$Accidentes, "pois")
+fit.negbin  = fitdist(df$Accidentes, "nbinom")
+
+# 2. Configuración del panel
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+# Usamos 'fitcol' para los modelos y 'datacol' para los datos observados
+cdfcomp(list(fit.poisson, fit.negbin), 
+        legendtext = c("Poisson", "NegBin"), 
+        main = "Comparación de CDF",
+        fitcol = c("steelblue", "darkorange"), # Argumento específico para líneas
+        datacol = "grey70")                  # Argumento específico para puntos
+
+# En qqcomp también se usa 'fitcol' para los símbolos de los modelos
+qqcomp(list(fit.poisson, fit.negbin), 
+       legendtext = c("Poisson", "NegBin"),
+       main = "Gráfico Q-Q",
+       fitcol = c("steelblue", "darkorange"))
+
+par(mfrow = c(1, 1))
 
 # Exportación objetos -----------------------------------------------------
 # 1. Definir ruta
