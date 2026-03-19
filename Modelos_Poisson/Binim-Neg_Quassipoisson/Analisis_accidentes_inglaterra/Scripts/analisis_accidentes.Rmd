@@ -1,0 +1,202 @@
+---
+title: "Análisis de Accidentes de Tráfico - Modelo GLM"
+subtitle: "Analisis multivariable del Censo Nacional Agropecuario (CNA)"
+author: "William David Ibica P"
+date: "`r Sys.Date()`"
+output: 
+  tufte::tufte_html:
+    tufte_variant: "envisioned" # Opcional: da un estilo más moderno
+    highlight: tango
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+pacman::p_load(BiocManager, lmtest, car, MASS, NHSRdatasets, ResourceSelection,
+               pROC, rcompanion, nortest, tidyverse, caret, mgcv, rms,
+               jtools, forestmodel,gvlma, trafo, readxl, tidyverse, naniar,
+               DataExplorer, FactoMineR, factoextra, corrplot,sjPlot,ggplot2,
+               MVN, DT, tidyplots, performance,see,SmartEDA,doBy, fitdistrplus,
+               sandwich, patchwork)
+
+ruta_in <- "C:/Users/user/3D Objects/MODELOS_POS/Modelos_Poisson/Bases/ACCIDENTES/Out/"
+
+# Cargar las colecciones
+mis_tablas <- readRDS(paste0(ruta_in, "tablas_descriptivas_completas.rds"))
+mis_barras <- readRDS(paste0(ruta_in, "graficos_barras.rds"))
+mis_boxplots <- readRDS(paste0(ruta_in, "graficos_boxplot_todos.rds"))
+mod  <- readRDS(paste0(ruta_in, "modelo_final_stepAIC.rds"))
+off_mod1 <- readRDS( paste0(ruta_in, "modelo_quasipoisson_offset.rds"))
+mod_Quas <- readRDS( paste0(ruta_in, "modelo_quasipoisson.rds"))
+Graf_reg <- readRDS( paste0(ruta_in, "grafico_regresion.rds"))
+Compara_graf <- readRDS( paste0(ruta_in, "grafico_validacion.rds"))
+Formula <- readRDS( paste0(ruta_in, "Formula.rds"))
+df_modelo <- readRDS( paste0(ruta_in, "df_modelo.rds"))
+```
+
+# Introducción
+## Descripción del Conjunto de Datos
+
+Este análisis utiliza el conjunto de datos de accidentes de tráfico del Reino Unido, que contiene más de 1.5 millones de registros de accidentes con 33 características que incluyen:
+
+- Ubicación geográfica (Longitud, Latitud)
+- Gravedad del accidente (Fatal, Serio, Leve)
+- Número de vehículos involucrados
+- **Número de víctimas (Variable respuesta principal)**
+- Condiciones de luz
+- Condiciones meteorológicas
+- Condiciones de la superficie de la carretera
+- Tipo de área (Urbana/Rural)
+- Límite de velocidad
+- Año del accidente (2005-2014)
+
+## Objetivos del Análisis
+
+### Objetivo General
+Que factores influyen en el número de víctimas en accidentes de tráfico, utilizando diversas técnicas estadísticas y de modelamiento.
+
+### Objetivos Específicos
+
+1. **Modelamiento Poisson**: Construir modelos de regresión Poisson para predecir el número de víctimas, incluyendo modelos con y sin offset.
+
+# 2. Preguntas de Investigación
+
+**P1**: ¿Cómo influye el número de vehículos involucrados en el número de víctimas de un accidente?
+
+**P2**: ¿Existen diferencias significativas en el número de víctimas entre accidentes en zonas urbanas y rurales?
+
+**P3**: ¿Cómo cambia la interpretación del modelo cuando se utiliza un offset para modelar la **tasa** de víctimas por vehículo?
+
+# Análisis Exploratorio de Datos (EDA)
+
+A continuación, se presentan resúmenes estadísticos del número de víctimas según diferentes variables.
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$via)
+```
+
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$zona)
+```
+
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$sev)
+```
+
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$sup)
+```
+
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$clim)
+```
+
+
+```{r eda-summary, echo=FALSE}
+DT::datatable(mis_tablas$vel)
+```
+
+
+```{r, echo=FALSE}
+DT::datatable(mis_tablas$veh)
+```
+
+## Gráficos Boxplot
+
+```{r, echo=FALSE, fig.fullwidth=TRUE}
+mis_boxplots$simples$B1 + mis_boxplots$simples$B2 + mis_boxplots$simples$B3
+```
+
+
+```{r, echo=FALSE}
+mis_boxplots$outliers$via + mis_boxplots$outliers$superficie
+```
+
+
+```{r, echo=FALSE}
+mis_boxplots$outliers$luz + mis_boxplots$outliers$clima
+```
+
+## Gráficos de barra
+```{r, echo=FALSE}
+mis_barras$via
+```
+
+
+```{r, echo=FALSE}
+mis_barras$superficie
+```
+
+
+```{r, echo=FALSE}
+mis_barras$luz
+```
+
+
+```{r, echo=FALSE}
+mis_barras$clima
+```
+
+
+# Modelado GLM
+
+## Modelo Poisson
+
+Se ajusta un modelo inicial asumiendo una distribución de Poisson.
+
+```{r, echo=FALSE}
+summ(mod, confint = T, exp = T)
+```
+
+## Modelo Quasipoisson
+
+Dado que el parámetro de dispersión puede ser diferente de 1, ajustamos un modelo Quasipoisson.
+```{r, echo=FALSE}
+summ(mod_Quas, confint = T, exp = T)
+```
+
+```{r, echo=FALSE}
+
+ct <- coeftest(mod_Quas, vcov = vcovHC(mod, type = "HC0"))
+
+tabla_sig <- ct[ct[, "Pr(>|z|)"] < 0.05, ]
+tabla_sig <- round(tabla_sig,4)
+datatable(tabla_sig)
+
+```
+## Modelo con Offset
+
+Utilizamos el número de vehículos como offset para modelar la tasa de víctimas.
+
+```{r, echo=FALSE}
+summ(off_mod1, confint = T, exp = T)
+```
+
+```{r, echo=FALSE}
+ct <- coeftest(off_mod1, vcov = vcovHC(mod, type = "HC0"))
+
+tabla_sig <- ct[ct[, "Pr(>|z|)"] < 0.05, ]
+tabla_sig <- round(tabla_sig,4)
+datatable(tabla_sig)
+```
+
+# Resultados y Opiniones
+
+### Análisis de Coeficientes
+*Escribe aquí tus observaciones sobre los coeficientes significativos...*
+
+### Interpretación de la Dispersión
+*Escribe aquí tu análisis sobre la sobredispersión encontrada...*
+
+### Conclusiones del Modelo
+*Escribe aquí tus conclusiones finales y recomendaciones...*
+
+# Apéndice: Diagnósticos
+
+```{r diagnostics}
+
+```
