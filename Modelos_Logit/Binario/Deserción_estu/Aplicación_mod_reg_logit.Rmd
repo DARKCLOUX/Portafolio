@@ -1,0 +1,564 @@
+---
+title: "Predicción de Deserción Estudiantil en Educación Superior"
+author: "Tu nombre"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+  word_document:
+    toc: true
+---
+
+```{r}
+#  LIBRERÍAS -----------------------------------------------
+pacman::p_load(tidyverse, MASS,car,mgcv,caret,pROC,ResourceSelection,jtools,            
+               forestmodel,DataExplorer,plotly,DT,DescTools)
+
+# CARGA Y CALIDAD DE DATOS --------------------------------
+data <- read_csv("Datos/dataset.csv", show_col_types = FALSE)
+glimpse(data)
+```
+
+# Introducción 
+
+El dataset contiene 4,424 registros y 35 atributos originales, cada uno representando un estudiante universitario del Instituto Politécnico de Portalegre (Portugal), con datos del período 2008/2009 a 2018/2019. Las variables cubren cuatro dimensiones: datos demográficos, socioeconómicos, macroeconómicos y rendimiento académico al final del primer y segundo semestre.
+
+```{r, fig.width=10, fig.height=10, warning=FALSE}
+# Valores faltantes
+plot_missing(data) +
+  labs(title = "Porcentaje de valores faltantes por variable") +
+  theme_minimal()
+
+# Duplicados
+sum(duplicated(data))
+```
+
+Se confirmó ausencia total de valores faltantes en el dataset. La verificación de duplicados arrojó $0$ registros duplicados. Esto es relevante porque elimina la necesidad de imputación y garantiza que cada observación es única e independiente, condición necesaria para la regresión logística.
+
+```{r, echo=FALSE, results='hide'}
+datos <- data %>%
+  rename(
+    Estado_civil                                     = `Marital status`,
+    Modalidad_de_solicitud                           = `Application mode`,
+    Orden_de_solicitud                               = `Application order`,
+    Curso                                            = Course,
+    Asistencia_diurna_nocturna                       = `Daytime/evening attendance`,
+    Titulo_previo                                    = `Previous qualification`,
+    Nacionalidad                                     = Nacionality,
+    Titulo_de_la_madre                               = `Mother's qualification`,
+    Titulo_del_padre                                 = `Father's qualification`,
+    Ocupacion_de_la_madre                            = `Mother's occupation`,
+    Ocupacion_del_padre                              = `Father's occupation`,
+    Desplazado                                       = Displaced,
+    Necesidades_educativas_especiales                = `Educational special needs`,
+    Deudor                                           = Debtor,
+    Cuotas_de_matricula_al_dia                       = `Tuition fees up to date`,
+    Género                                           = Gender,
+    Becario                                          = `Scholarship holder`,
+    Edad_en_el_momento_de_la_inscripcion             = `Age at enrollment`,
+    Internacional                                    = International,
+    Unidades_curriculares_1er_semestre_acreditadas   = `Curricular units 1st sem (credited)`,
+    Unidades_curriculares_1er_semestre_matriculadas  = `Curricular units 1st sem (enrolled)`,
+    Unidades_curriculares_1er_semestre_evaluaciones  = `Curricular units 1st sem (evaluations)`,
+    Unidades_curriculares_1er_semestre_aprobadas     = `Curricular units 1st sem (approved)`,
+    Unidades_curriculares_1er_semestre_calificacion  = `Curricular units 1st sem (grade)`,
+    Unidades_curriculares_1er_semestre_sin_evaluaciones = `Curricular units 1st sem (without evaluations)`,
+    Unidades_curriculares_2do_semestre_acreditadas   = `Curricular units 2nd sem (credited)`,
+    Unidades_curriculares_2do_semestre_matriculadas  = `Curricular units 2nd sem (enrolled)`,
+    Unidades_curriculares_2do_semestre_evaluaciones  = `Curricular units 2nd sem (evaluations)`,
+    Unidades_curriculares_2do_semestre_aprobadas     = `Curricular units 2nd sem (approved)`,
+    Unidades_curriculares_2do_semestre_calificacion  = `Curricular units 2nd sem (grade)`,
+    Unidades_curriculares_2do_semestre_sin_evaluaciones = `Curricular units 2nd sem (without evaluations)`,
+    Tasa_de_desempleo                                = `Unemployment rate`,
+    Tasa_de_inflacion                                = `Inflation rate`,
+    PIB                                              = GDP,
+    Objetivo                                         = Target
+  )
+```
+
+```{r}
+# Variable respuesta
+tabla <- table(datos$Objetivo)
+cat   <- prop.table(tabla)
+
+plot_ly(labels = names(cat),
+        values = as.vector(tabla),
+        type   = "pie",
+        text   = paste0(names(cat), "<br>", as.vector(tabla),
+                        " (", round(as.vector(cat) * 100, 1), "%)"),
+        textinfo  = "text",
+        hoverinfo = "label+percent+value")
+
+```
+
+- 1. Variable respuesta: distribución de clases
+
+La variable objetivo original presenta tres categorías: Graduate con $49.9\%$, Dropout con $32.1\%$ y Enrolled con $17.9\%$. Para el análisis de regresión logística binaria, se recodificó como variable dicotómica: Dropout = 1 (evento de interés o éxito), Graduate y Enrolled = 0 (no deserción). Esta decisión está alineada con el objetivo institucional de identificar estudiantes en riesgo de abandono.
+
+Por otra parte, el dataset presenta desbalance moderado (32% vs 68%). Este desbalance fue monitoreado durante la evaluación del modelo. Con esta proporción no se justifica oversampling agresivo, pero sí se consideró en la selección del umbral de clasificación.
+
+```{r}
+# Distribución por curso (antes de agrupar)
+tabla1 <- table(datos$Curso)
+cat1   <- prop.table(tabla1)
+plot_ly(labels = names(cat1), values = as.vector(tabla1),
+        type = "pie", hole = 0,
+        text = paste0(names(cat1), "<br>", as.vector(tabla1),
+                      " (", round(as.vector(cat1) * 100, 1), "%)"),
+        textinfo = "text", hoverinfo = "label+percent+value")
+```
+
+- 1. Variable cursos o carreras universitarias
+
+El curso 12 de enfermería es el más frecuente con 766 estudiantes y un porcentaje del $17.3\%$, seguido del curso 9 - gestión diurna con 380 y $8.6\%$ y curso 10 - servicio Social con 355 $8\%$. En el extremo opuesto, el curso 1 - Biocombustibles tiene solo 12 estudiantes $0.3\%$ y el curso 13 - higiene oral solo 86 y un $1.9\%$. Esta distribución altamente asimétrica justifica la agrupación por áreas de conocimiento, además, mantener los 17 cursos como variable categórica habría generado coeficientes inestables para los cursos minoritarios por escasez de observaciones, problema clásico de separación cuasi-completa en regresión logística.
+
+```{r}
+# Distribución por título previo (antes de agrupar)
+tabla2 <- table(datos$Titulo_previo)
+cat2   <- prop.table(tabla2)
+plot_ly(labels = names(cat2), values = as.vector(cat2), type = "pie", hole = 0)
+
+```
+
+Este gráfico es el que más justifica la agrupación realizada. El título previo código 1- educación secundaria completa concentra el $84\%$ de las observaciones, mientras que los 16 códigos restantes (*títulos educativos*) se reparten el $16\%$ restante, con proporciones tan pequeñas como $0.02\%$ para varios niveles. Mantener los 17 niveles originales como variable categórica habría sido metodológicamente indefendible y pasaría el mismo problema que la variable categórica cursos. La agrupación en 7 niveles educativos conceptualmente coherentes resuelve este problema preservando la información sustantiva.
+
+```{r}
+# Conversión a factor
+datos <- datos %>%
+  mutate(across(c(Género, Becario, Cuotas_de_matricula_al_dia, Deudor,
+                  Titulo_previo, Asistencia_diurna_nocturna,
+                  Estado_civil, Desplazado), as.factor))
+
+# Agrupación de cursos en áreas de conocimiento
+datos <- datos %>%
+  mutate(Area_conocimiento = case_when(
+    Curso %in% c(6, 12, 13) ~ "Salud",
+    Curso %in% c(1, 7)      ~ "Tecnologia",
+    Curso %in% c(4, 8)      ~ "Agro_Equino",
+    Curso %in% c(2, 5, 15)  ~ "Diseno_Comuni",
+    Curso %in% c(9, 14, 17) ~ "Gestion",
+    Curso %in% c(3, 10, 11) ~ "Servicios_Social",
+    Curso %in% c(16)        ~ "Educacion",
+    TRUE                    ~ "Otro"
+  ))
+
+# Agrupación de título previo en niveles educativos
+datos <- datos %>%
+  mutate(Nivel_educativo_previo = case_when(
+    Titulo_previo == 1                       ~ "Secundaria_completa",
+    Titulo_previo %in% c(7, 8, 9, 10, 11)   ~ "Secundaria_incompleta",
+    Titulo_previo %in% c(12, 13)             ~ "Basica",
+    Titulo_previo %in% c(14, 16)             ~ "Tecnico_profesional",
+    Titulo_previo %in% c(2, 3, 15)           ~ "Superior_grado",
+    Titulo_previo %in% c(4, 5, 17)           ~ "Superior_posgrado",
+    Titulo_previo == 6                        ~ "Superior_incompleta",
+    TRUE                                      ~ "Otro"
+  ))
+```
+
+- 1. **Agrupación de Curso a "Área de conocimiento"**
+
+Los 17 cursos originales fueron agrupados en 7 áreas temáticas basándose en la clasificación del paper original (Realinho et al., 2022). Esta reducción de dimensionalidad tiene tres justificaciones: (1) evita el sobreajuste por exceso de categorías con pocas observaciones, (2) facilita la interpretabilidad de los coeficientes, y (3) agrupa cursos con dinámicas de deserción similares según la literatura.
+
+- 2. **Agrupación de Título previo a "Nivel educativo previo"**
+
+Agrupación de Título previo → Nivel educativo previo
+Los 17 niveles de título previo fueron reagrupados en 7 categorías conceptualmente coherentes. La categoría de referencia es Básica ($n=144$), que agrupa educación básica 2do y 3er ciclo. Esta agrupación reduce la escasez de observaciones en categorías minoritarias y mejora la estabilidad de los estimadores.
+
+```{r}
+# Distribución de variables agrupadas
+tabla3 <- table(datos$Area_conocimiento)
+cat3   <- prop.table(tabla3)
+plot_ly(labels = names(cat3), values = as.vector(tabla3), type = "pie", hole = 0,
+        text = paste0(names(cat3), "<br>", as.vector(tabla3),
+                      " (", round(as.vector(cat3) * 100, 1), "%)"),
+        textinfo = "text", hoverinfo = "label+percent+value")
+
+```
+
+La agrupación de los 17 cursos en 7 áreas produjo una distribución más balanceada que los cursos originales. Salud domina con 1,189 estudiantes $26.9\%$, seguida de Gestión $20.7\%$ y Servicios Social $18.6\%$. Las tres áreas juntas concentran el 66.2% del total. En el extremo opuesto, Tecnología $4.1\%$ y Educación $4.3\%$ son las áreas con menor representación, lo cual tiene implicaciones para la estimación de sus coeficientes en el modelo: con $n=182$ y $n=192$ respectivamente, los intervalos de confianza de sus OR serán más amplios. Esto explica los IC amplios que se observaron en el forest plot para Area_conocimiento.
+
+```{r}
+tabla4 <- table(datos$Nivel_educativo_previo)
+cat4   <- prop.table(tabla4)
+plot_ly(labels = names(cat4), values = as.vector(tabla4), type = "pie", hole = 0,
+        text = paste0(names(cat4), "<br>", as.vector(tabla4),
+                      " (", round(as.vector(cat4) * 100, 1), "%)"),
+        textinfo = "text", hoverinfo = "label+percent+value")
+```
+
+Tras la agrupación, Secundaria_completa mantiene su dominancia con 3,717 estudiantes $84\%$, que se convierte en la categoría de referencia implícita más frecuente del modelo. Las demás categorías tienen tamaños razonables: Técnico_profesional con 255 $5.8\%$, Superior_grado con 190 $4.3\%$ y Básica con 169 $3.8\%$. Las categorías con menor representación son Superior_posgrado (15, $0.3\%$) y Superior_incompleta (16, $0.4\%$), lo que explica los intervalos de confianza amplios que se observaron para estas categorías en los OR (Superior_incompleta: IC [0.81, 19.21] y Superior_posgrado: IC [0.50, 17.08]). Estos intervalos amplios no invalidan los coeficientes pero sí indican que deben interpretarse con cautela dado el bajo número de casos.
+
+```{r}
+# SELECCIÓN DE VARIABLES Y PREPARACIÓN
+df <- datos %>%
+  select(Objetivo, Estado_civil, Area_conocimiento,
+         Tasa_de_desempleo, Tasa_de_inflacion, PIB,
+         Género, Becario, Edad_en_el_momento_de_la_inscripcion,
+         Cuotas_de_matricula_al_dia, Deudor, Nivel_educativo_previo,
+         Asistencia_diurna_nocturna, Desplazado,
+         Unidades_curriculares_1er_semestre_acreditadas,
+         Unidades_curriculares_1er_semestre_matriculadas,
+         Unidades_curriculares_1er_semestre_evaluaciones,
+         Unidades_curriculares_1er_semestre_aprobadas,
+         Unidades_curriculares_1er_semestre_calificacion,
+         Unidades_curriculares_2do_semestre_acreditadas,
+         Unidades_curriculares_2do_semestre_matriculadas,
+         Unidades_curriculares_2do_semestre_evaluaciones,
+         Unidades_curriculares_2do_semestre_aprobadas,
+         Unidades_curriculares_2do_semestre_calificacion)
+
+# Variable respuesta binaria
+df$Objetivo <- ifelse(df$Objetivo == "Dropout", 1, 0)
+
+# SPLIT TRAIN / TEST (80/20) ------------------------------
+set.seed(123)
+training_idx_edu <- df$Objetivo %>% createDataPartition(p = 0.8, list = FALSE)
+train.edu <- df[ training_idx_edu, ]
+test.edu  <- df[-training_idx_edu, ]
+
+```
+
+Se aplicó una partición estratificada 80/20 para reproducibilidad. La estratificación garantiza que la proporción de dropout (deserción - 32.1%) se preserve en ambos conjuntos, evitando el sesgo de muestreo en clases desbalanceadas
+
+# Modelamiento
+
+## Variables 
+```{r}
+M <- glm(Objetivo ~ ., data = train.edu, family = "binomial")
+mod <- stepAIC(M, direction = "both", trace = FALSE)
+summary(mod)
+vif(mod)
+```
+
+Se ajustó un modelo logístico completo con todos los predictores disponibles. Posteriormente se aplicó selección de variables mediante stepAIC() con dirección bidireccional, que optimiza el Criterio de Información de Akaike (AIC) añadiendo y eliminando variables en cada paso.
+
+## Variables significativas del modelo 
+
+```{r, fig.width=10, fig.height=10}
+# Visualización de coeficientes
+plot_summs(mod, confint = T, exp = T) + scale_x_log10()
+```
+
+El modelo final seleccionado por stepAIC incluye 16 predictores incluyendo los niveles de referencia de las variables categóricas. La devianza nula fue $4,446.0$ y la devianza residual 2,222.8, con $AIC = 2,276.8$. La reducción de devianza de $2,223.2$ puntos con 27 parámetros indica un ajuste sustancial respecto al modelo nulo.
+
+# Validación Supuestos
+
+## Linealidad
+```{r, fig.width=14, fig.height=10}
+# 8.1 Linealidad con el logit (GAM)
+# Box-Tidwell no aplica: variables continuas con ceros
+# Se usa GAM como alternativa visual
+gam_model <- gam(Objetivo ~
+                   s(Unidades_curriculares_1er_semestre_aprobadas) +
+                   s(Unidades_curriculares_1er_semestre_calificacion) +
+                   s(Unidades_curriculares_2do_semestre_acreditadas) +
+                   s(Unidades_curriculares_2do_semestre_matriculadas) +
+                   s(Unidades_curriculares_2do_semestre_evaluaciones) +
+                   s(Unidades_curriculares_2do_semestre_aprobadas) +
+                   s(Unidades_curriculares_2do_semestre_calificacion) +
+                   s(Edad_en_el_momento_de_la_inscripcion) +
+                   s(Tasa_de_desempleo) +
+                   Area_conocimiento + Género + Becario +
+                   Cuotas_de_matricula_al_dia + Deudor +
+                   Nivel_educativo_previo + Desplazado,
+                 family = binomial,
+                 data = train.edu)
+plot(gam_model, pages = 1)
+```
+
+* Box-Tidwell no aplica: variables continuas con ceros
+* Se usa GAM como alternativa visual
+
+```{r, echo=FALSE}
+## Eliminación de variable no significativa
+# Unidades_curriculares_2do_semestre_evaluaciones: p = 0.1162 → no aporta
+anova(mod,
+      update(mod, ~. - Unidades_curriculares_2do_semestre_evaluaciones),
+      test = "Chisq")
+
+mod_new <- update(mod, ~. - Unidades_curriculares_2do_semestre_evaluaciones)
+vif(mod_new)
+AIC(mod, mod_new)
+BIC(mod, mod_new)
+```
+
+Dado que varias variables continuas contienen valores de cero (e.g., unidades aprobadas = 0 cuando el estudiante no aprobó ninguna), la prueba de Box-Tidwell no es aplicable directamente. Se utilizó como alternativa un Modelo Aditivo Generalizado **GAM** con splines cúbicos suavizados s() para cada variable continua, lo que permite detectar desviaciones de la linealidad en el logit de forma visual.
+
+| Variable | Forma observada | ¿Linealidad cumplida? |
+|----------|-----------------|----------------------|
+| Aprobadas 1er semestre | Decreciente, aproximadamente lineal |  Sí |
+| Calificación 1er semestre | Casi plana, efecto mínimo |  Sí |
+| Acreditadas 2do semestre | Creciente, lineal |  Sí |
+| Matriculadas 2do semestre | Creciente con leve curvatura |  Sí  |
+| Evaluaciones 2do semestre | Curvatura suave, no lineal estricta |  Marginal |
+| Aprobadas 2do semestre | Fuertemente decreciente, lineal |  Sí |
+| Calificación 2do semestre | Plana, efecto pequeño |  Sí |
+| Edad inscripción | Creciente, lineal |  Sí |
+| Tasa desempleo | Creciente, lineal |  Sí |
+
+La variable Unidades_curriculares_2do_semestre_evaluaciones mostró la mayor desviación de la linealidad, con una curvatura suave y efecto marginal. Este hallazgo fue consistente con su posterior eliminación del modelo por no significancia estadística,  $p_{valor }=0.116$.
+
+## Distancias de COOK
+
+```{r}
+## Observaciones influyentes (Distancias de Cook)
+plot(mod_new, which = 4)
+influencePlot(mod_new)
+
+# Inspección de las 3 más influyentes
+influen <- train.edu[c(875, 1738, 3406), ] %>%
+  select(Objetivo, Edad_en_el_momento_de_la_inscripcion,
+         Unidades_curriculares_1er_semestre_aprobadas,
+         Unidades_curriculares_1er_semestre_calificacion,
+         Unidades_curriculares_2do_semestre_aprobadas,
+         Unidades_curriculares_2do_semestre_matriculadas,
+         Cuotas_de_matricula_al_dia, Deudor, Becario,
+         Desplazado, Area_conocimiento, Nivel_educativo_previo)
+```
+
+Se calcularon las distancias de Cook para identificar observaciones que ejercen influencia desproporcionada sobre los coeficientes estimados. El criterio de corte conservador es 4/n.
+
+La observación 3406 presentó 18 años de edad con título previo código 4 (maestría), combinación imposible en cualquier sistema educativo normal. Verificación en los datos originales confirmó el error: Titulo_previo = 4 (Higher education - master's degree) con Edad = 18. Esta observación fue eliminada del conjunto de entrenamiento y el modelo fue reajustado.
+
+Las observaciones 875 y 1738 fueron inspeccionadas manualmente y presentan perfiles atípicos pero coherentes: un estudiante de 33 años con posgrado en Diseño (1738) y un estudiante de 22 años con título previo superior incompleta en Salud (875). Ambas se conservaron.
+
+El Cook's D máximo tras la corrección es 0.0176, 57 veces menor que el umbral crítico de 1. El modelo es estable ante todas las observaciones conservadas.
+
+```{r}
+# Verificación obs 3406: 18 años con título de maestría → error de registro
+datos[training_idx_edu[3406],
+      c("Edad_en_el_momento_de_la_inscripcion",
+        "Titulo_previo", "Nivel_educativo_previo")]
+
+# Obs 875 y 1738: revisadas, sin incoherencia objetiva → se conservan
+
+# Eliminación del error de registro y reajuste
+train.edu <- train.edu[-3406, ]
+mod_new   <- glm(formula(mod_new), data = train.edu, family = "binomial")
+
+# Verificar estabilidad de coeficientes tras eliminación
+summ(mod_new, exp = T, confint = T)
+```
+
+
+## Prueba de bondad de ajuste
+```{r}
+hl <- hoslem.test(train.edu$Objetivo, mod_new$fitted.values, g = 10);hl
+cbind(hl$observed, hl$expected)
+
+# MÉTRICAS DE EVALUACIÓN  -------------------------------------------------
+PseudoR2(mod_new, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+```
+
+- 1. Supuesto cumplido "$p=0.063$. El desajuste residual en deciles bajos está identificado, diagnosticado y documentado. No corresponde a un error de especificación sino a información no disponible en el dataset.
+
+El mayor desajuste se concentra en el decil 2 (diferencia de $8.23$) y el decil 5 (diferencia de $10.07$). Estos corresponden a estudiantes con probabilidad predicha baja ($0.025-0.13$) que abandonaron. El análisis diagnóstico de estos estudiantes reveló que tienen rendimiento académico significativamente superior al resto de desertores (calificación promedio $12.9$ vs $7.0$, aprobadas $5.75$ vs $2.46$), indicando que su abandono responde a factores no observados en el dataset.
+
+- motivación, situación personal, cambio de carrera.
+
+- 2. El modelo tiene ajuste excelente según todas las métricas de pseudo-R². $Nagelkerke=0.65$ indica que el modelo captura el $65\%$ de la variabilidad en la probabilidad de deserción.
+
+# Evaluacion del modelo
+
+###  Odd Ratios
+
+```{r, fig.width=14, fig.height=10, warning=FALSE}
+forest_model(mod_new, exponentiate = T)
+```
+
+```{r, warning=FALSE}
+library(knitr)
+library(kableExtra)
+
+tabla <- data.frame(
+  Variable = c(
+    "Cuotas al día = Sí",
+    "Aprobadas 2do sem",
+    "Aprobadas 1er sem",
+    "Becario = Sí",
+    "Tec. profesional",
+    "Calificación 2do sem",
+    "Matriculadas 2do sem",
+    "Acreditadas 2do sem",
+    "Area: Educacion",
+    "Desplazado = Sí",
+    "Deudor = Sí",
+    "Género masculino",
+    "Edad inscripción",
+    "Tasa desempleo",
+    "Calificación 1er sem"
+  ),
+  OR = c(0.10, 0.54, 0.77, 0.64, 0.45, 0.94, 1.66, 1.31, 2.78, 1.43, 1.51, 1.37, 1.04, 1.07, 1.05),
+  IC_95 = c(
+    "[0.07, 0.15]", "[0.49, 0.59]", "[0.70, 0.84]", "[0.48, 0.87]", "[0.21, 0.95]",
+    "[0.90, 0.99]", "[1.52, 1.81]", "[1.19, 1.46]", "[1.52, 5.07]", "[1.12, 1.83]",
+    "[1.06, 2.14]", "[1.07, 1.74]", "[1.02, 1.06]", "[1.03, 1.12]", "[1.00, 1.10]"
+  ),
+  p_valor = c(
+    "<0.001", "<0.001", "<0.001", "0.004", "0.037",
+    "0.013", "<0.001", "<0.001", "0.001", "0.004",
+    "0.023", "0.013", "<0.001", "0.001", "0.042"
+  ),
+  Interpretacion = c(
+    "Tener cuotas al día REDUCE el riesgo de deserción en un 90%. Es el predictor más fuerte del modelo.",
+    "Cada materia adicional aprobada en 2do sem reduce el riesgo de deserción en un 46%.",
+    "Cada materia adicional aprobada en 1er sem reduce el riesgo en un 23%.",
+    "Ser becario reduce el riesgo de deserción en un 36%.",
+    "Título técnico-profesional previo reduce el riesgo un 55% vs educación básica.",
+    "Cada punto adicional en calificación 2do sem reduce el riesgo un 6%.",
+    "Cada materia matriculada extra en 2do sem aumenta el riesgo un 66%.",
+    "Cada unidad acreditada extra en 2do sem aumenta el riesgo un 31%.",
+    "Estudiantes de Educación tienen 2.78 veces más riesgo que Agro-Equino (referencia).",
+    "Ser desplazado aumenta el riesgo de deserción un 43%.",
+    "Ser deudor aumenta el riesgo un 51%.",
+    "Los hombres tienen 37% más riesgo de deserción que las mujeres.",
+    "Cada año adicional de edad al inscribirse aumenta el riesgo un 4%.",
+    "Cada punto porcentual de desempleo adicional aumenta el riesgo un 7%.",
+    "Efecto paradójico menor: mayor calificación 1er sem asociada levemente a más riesgo."
+  )
+)
+
+kable(tabla, 
+      col.names = c("Variable", "OR", "IC 95%", "p-valor", "Interpretación sustantiva"),
+      align = c("l", "c", "c", "c", "l")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, width = "15em") %>%
+  column_spec(5, width = "25em")
+```
+
+# Evaluación predictiva (conjunto prueba)
+
+```{r}
+pred_test <- predict(mod_new, newdata = test.edu, type = "response")
+roc_test  <- roc(test.edu$Objetivo, pred_test)
+auc(roc_test)
+
+## Matriz de confusión — umbral 0.5
+pred_clase <- ifelse(pred_test > 0.5, 1, 0)
+cm_05 <- confusionMatrix(as.factor(pred_clase),
+                         as.factor(test.edu$Objetivo),
+                         positive = "1")
+cm_05
+
+## Umbral óptimo por criterio de Youden
+umbral_youden    <- coords(roc_test, "best", best.method = "youden")$threshold
+pred_clase_youden <- ifelse(pred_test > umbral_youden, 1, 0)
+cm_youden <- confusionMatrix(as.factor(pred_clase_youden),
+                             as.factor(test.edu$Objetivo),
+                             positive = "1")
+cm_youden
+
+## Comparación de umbrales
+comparacion <- data.frame(
+  Metrica       = c("Accuracy", "Sensibilidad", "Especificidad", "Kappa"),
+  Umbral_0.5    = round(c(cm_05$overall["Accuracy"],
+                          cm_05$byClass["Sensitivity"],
+                          cm_05$byClass["Specificity"],
+                          cm_05$overall["Kappa"]), 4),
+  Umbral_Youden = round(c(cm_youden$overall["Accuracy"],
+                          cm_youden$byClass["Sensitivity"],
+                          cm_youden$byClass["Specificity"],
+                          cm_youden$overall["Kappa"]), 4)
+)
+
+DT::datatable(comparacion,
+              options  = list(dom = "t", pageLength = 4),
+              rownames = FALSE) %>%
+  DT::formatRound(columns = c("Umbral_0.5", "Umbral_Youden"), digits = 4)
+```
+
+### AUC
+
+ Se calculó la curva ROC  sobre el conjunto de prueba (n=884), que relaciona la Tasa de Verdaderos Positivos (Sensibilidad) con la Tasa de Falsos Positivos (1-Especificidad) para todos los umbrales posibles. El área bajo la curva (AUC) resume el poder discriminativo del modelo.
+
+El AUC de 0.925 indica que el modelo discrimina correctamente entre desertores y no desertores en el 92.5% de los pares posibles. Para contexto, en problemas de predicción educativa: AUC 0.70-0.80 = aceptable, 0.80-0.90 = bueno, >0.90 = excelente
+
+### Umbral de Youden
+
+El umbral de clasificación por defecto (0.5) asume costos iguales para falsos positivos y falsos negativos. Para un problema de deserción estudiantil, donde no detectar a un desertor real es más costoso que intervenir innecesariamente con un no-desertor, se buscó el umbral óptimo.
+El criterio de Youden maximiza la suma de Sensibilidad + Especificidad - 1, encontrando el punto de la curva ROC con mayor balance entre ambas tasas:
+
+| Criterio | Punto de corte | Sensibilidad | Especificidad |
+|----------|---------------|--------------|---------------|
+| Youden (óptimo matemático) | 0.416 | 81.6% | 91.7% |
+
+### Matrices de confusión 
+
+El umbral de Youden (0.416) captura 17 desertores adicionales (81.6% vs 75.6% de sensibilidad) a costa de 17 falsas alarmas adicionales. El Kappa de Cohen mejora levemente (0.734 vs 0.726), indicando mejor acuerdo entre predicciones y clases reales ajustado por el azar.
+
+Para el objetivo institucional (identificar estudiantes en riesgo para intervención tutorial), el umbral de Youden es preferible: no detectar a un desertor real tiene consecuencias académicas, económicas y personales mayores que una intervención tutorial innecesaria
+
+
+## Graficós finales
+```{r}
+# Curva ROC con punto de corte óptimo
+plot(roc_test,
+     col = "steelblue", lwd = 2,
+     main = "Curva ROC - Modelo de Deserción Estudiantil",
+     print.auc = TRUE, print.auc.y = 0.4)
+
+punto <- coords(roc_test, "best", best.method = "youden")
+points(punto$specificity, punto$sensitivity,
+       pch = 19, col = "firebrick", cex = 1.5)
+text(punto$specificity - 0.05, punto$sensitivity - 0.04,
+     paste0("Umbral = ", round(punto$threshold, 3)),
+     col = "firebrick", cex = 0.85)
+
+# Distribución de probabilidades predichas por clase real
+data.frame(prob = pred_test,
+           real = as.factor(test.edu$Objetivo)) %>%
+  ggplot(aes(x = prob, fill = real)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = umbral_youden,
+             linetype = "dashed", color = "firebrick") +
+  scale_fill_manual(values = c("steelblue", "coral"),
+                    labels = c("No desertor", "Desertor")) +
+  labs(title = "Distribución de probabilidades predichas",
+       x = "Probabilidad predicha", y = "Densidad",
+       fill = "Clase real") +
+  theme_minimal()
+
+```
+
+Distribución de probabilidades predichas
+El gráfico muestra la separación entre clases que logra el modelo. Los no desertores (azul) se concentran con alta densidad cerca de 0, mientras que los desertores (naranja) se acumulan cerca de 1. La línea punteada roja marca el umbral óptimo de Youden (0.416).
+
+Tres observaciones clave:
+
+- El solapamiento entre 0.20 y 0.50 representa la zona de incertidumbre del modelo, donde ambas clases coexisten y los errores de clasificación son más frecuentes.
+
+- La bimodalidad de la distribución naranja revela dos tipos de desertor: uno claramente identificable (pico cerca de 1.0) y uno que el modelo no distingue bien de los no desertores (pico cerca de 0.10), correspondiente a estudiantes con buen rendimiento académico que abandonan por razones no observadas.
+
+- La amplia separación entre picos principales confirma visualmente el AUC=0.925: el modelo discrimina bien en los extremos, donde se concentra la mayoría de los casos.
+
+# Conclusiones
+
+1. **Hallazgos principales**
+
+• Las cuotas de matrícula al día es el predictor más potente: OR=0.10 implica que tenerlas al día reduce el riesgo de deserción en un 90%. Este hallazgo tiene implicación directa de política: los programas de apoyo financiero son la intervención más efectiva.
+
+• El rendimiento académico del segundo semestre (aprobadas y matriculadas) es el predictor académico más fuerte. La combinación de muchas materias matriculadas con pocas aprobadas es la señal de alerta más clara de riesgo de deserción.
+
+• Ser desplazado (estudiante fuera de su ciudad de origen) aumenta el riesgo un 43%, controlando por todas las demás variables. Este factor contextual no visible en el rendimiento académico justificó su inclusión en el modelo.
+
+• Los factores macroeconómicos (tasa de desempleo) tienen efecto significativo pero pequeño (OR=1.07 por punto porcentual), consistente con la literatura internacional.
+
+• El área de Educación presenta el mayor riesgo relativo (OR=2.78 vs Agro-Equino), lo que sugiere que los programas de formación docente tienen dinámicas de retención particulares que merecen atención institucional.
+
+2. **Limitaciones identificadas**
+
+• El desajuste residual de Hosmer-Lemeshow en los deciles bajos (probabilidad 0.025-0.13) indica que el modelo no captura completamente a los estudiantes que abandonan con buen rendimiento académico. Estos casos responden probablemente a factores motivacionales o personales no registrados en el dataset.
+
+• Los datos provienen de una sola institución portuguesa (Instituto Politécnico de Portalegre). La generalización a otros contextos geográficos o tipos de institución debe hacerse con cautela.
+
+• El dataset no incluye variables sobre motivación, salud mental, distancia al hogar, horas de trabajo, ni redes de apoyo social, que la literatura identifica como predictores importantes de deserción.
+
+• Se eliminó 1 observación por error de registro confirmado (obs 3406: 18 años con maestría). Esto sugiere que el proceso de recolección de datos tiene margen de mejora.
+
